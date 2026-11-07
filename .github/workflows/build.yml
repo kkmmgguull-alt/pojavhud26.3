@@ -1,0 +1,713 @@
+name: Build PojavHUD 1.2.0 (MC 26.3) Jar
+​on:
+push:
+branches: [ "main", "master" ]
+pull_request:
+branches: [ "main", "master" ]
+workflow_dispatch:
+​jobs:
+build:
+runs-on: ubuntu-latest
+​steps:
+- name: Generate PojavHUD 1.2.0 (Minecraft 26.3) Source Files
+run: |
+mkdir -p src/main/java/com/pojavhud
+mkdir -p src/main/resources/assets/pojavhud/lang
+​cat << 'EOF' > settings.gradle
+pluginManagement {
+repositories {
+maven {
+name = 'Fabric'
+url = 'https://maven.fabricmc.net/'
+}
+mavenCentral()
+gradlePluginPortal()
+}
+}
+EOF
+​cat << 'EOF' > gradle.properties
+org.gradle.jvmargs=-Xmx2G
+org.gradle.parallel=true
+org.gradle.configuration-cache=false
+​minecraft_version=26.3
+loader_version=0.19.5
+loom_version=1.19.3
+​version=1.2.0
+group=com.pojavhud
+archives_base_name=pojavhud-26.3
+​fabric_api_version=0.165.0+26.3
+modmenu_version=21.0.0
+EOF
+​cat << 'EOF' > build.gradle
+plugins {
+id 'net.fabricmc.fabric-loom' version "${loom_version}"
+id 'maven-publish'
+}
+​version = project.version
+group = project.group
+​base {
+archivesName = project.archives_base_name
+}
+​repositories {
+maven { url = "https://maven.terraformersmc.com/releases/" }
+maven { url = "https://maven.fabricmc.net/" }
+mavenCentral()
+}
+​dependencies {
+minecraft "com.mojang:minecraft:{project.minecraft_version}"
+implementation "net.fabricmc:fabric-loader:{project.loader_version}"
+implementation "net.fabricmc.fabric-api:fabric-api:{project.fabric_api_version}"
+compileOnly "com.terraformersmc:modmenu:{project.modmenu_version}"
+}
+​processResources {
+inputs.property "version", project.version
+filesMatching("fabric.mod.json") {
+expand "version": project.version
+}
+}
+​tasks.withType(JavaCompile).configureEach {
+it.options.release = 25
+}
+​java {
+withSourcesJar()
+sourceCompatibility = JavaVersion.VERSION_25
+targetCompatibility = JavaVersion.VERSION_25
+}
+​jar {
+from("LICENSE") {
+rename { "{it}_{project.base.archivesName.get()}" }
+}
+}
+EOF
+​cat << 'EOF' > LICENSE
+MIT License
+​Copyright (c) 2026 PojavHUD
+​Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+​The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+EOF
+​cat << 'EOF' > src/main/resources/fabric.mod.json
+{
+"schemaVersion": 1,
+"id": "pojavhud",
+"version": "${version}",
+"name": "PojavHUD (26.3)",
+"description": "Customizable Minecraft item texture overlay for hotbar slots. For Minecraft 26.3. Designed for PojavLauncher touchscreen buttons.",
+"authors": ["PojavHUD"],
+"contact": {},
+"license": "MIT",
+"icon": "assets/pojavhud/icon.png",
+"environment": "client",
+"entrypoints": {
+"main": ["com.pojavhud.PojavHud"],
+"client": ["com.pojavhud.PojavHudClient"],
+"modmenu": ["com.pojavhud.ModMenuIntegration"]
+},
+"depends": {
+"fabricloader": ">=0.19.0",
+"minecraft": ">=26.3",
+"java": ">=25",
+"fabric-api": ""
+},
+"suggests": {
+"modmenu": ""
+}
+}
+EOF
+​cat << 'EOF' > src/main/resources/assets/pojavhud/lang/en_us.json
+{
+"key.pojavhud.toggle": "Toggle PojavHUD",
+"key.pojavhud.editor": "Open PojavHUD Editor",
+"key.pojavhud.hidemenus": "Toggle PojavHUD Hide in Menus",
+"category.pojavhud": "PojavHUD",
+"key.category.pojavhud.main": "PojavHUD"
+}
+EOF
+​cat << 'EOF' > src/main/java/com/pojavhud/PojavHud.java
+package com.pojavhud;
+​import net.fabricmc.api.ModInitializer;
+​public class PojavHud implements ModInitializer {
+@Override
+public void onInitialize() {
+}
+}
+EOF
+​cat << 'EOF' > src/main/java/com/pojavhud/ModMenuIntegration.java
+package com.pojavhud;
+​import com.terraformersmc.modmenu.api.ConfigScreenFactory;
+import com.terraformersmc.modmenu.api.ModMenuApi;
+​public class ModMenuIntegration implements ModMenuApi {
+@Override
+public ConfigScreenFactory<?> getModConfigScreenFactory() {
+return EditorScreen::new;
+}
+}
+EOF
+​cat << 'EOF' > src/main/java/com/pojavhud/PojavHudClient.java
+package com.pojavhud;
+​import com.mojang.blaze3d.platform.InputConstants;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+import net.minecraft.client.KeyMapping;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+​public class PojavHudClient implements ClientModInitializer {
+public static final String MOD_ID = "pojavhud";
+public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+​public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
+Identifier.fromNamespaceAndPath(MOD_ID, "main")
+);
+​public static KeyMapping toggleKey;
+public static KeyMapping editorKey;
+public static KeyMapping hideInMenusKey;
+​public static boolean hudVisible = true;
+public static boolean editorOpen = false;
+public static boolean hideInMenus = false;
+​public static HudConfig config;
+​@Override
+public void onInitializeClient() {
+LOGGER.info("PojavHUD 1.2.0 (MC 26.3) initializing...");
+config = HudConfig.load();
+​toggleKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+"key.pojavhud.toggle",
+InputConstants.Type.KEYSYM,
+InputConstants.KEY_N,
+CATEGORY
+));
+editorKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+"key.pojavhud.editor",
+InputConstants.Type.KEYSYM,
+InputConstants.KEY_O,
+CATEGORY
+));
+hideInMenusKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
+"key.pojavhud.hidemenus",
+InputConstants.Type.KEYSYM,
+InputConstants.KEY_H,
+CATEGORY
+));
+​ClientTickEvents.END_CLIENT_TICK.register(client -> {
+while (toggleKey.consumeClick()) {
+hudVisible = !hudVisible;
+}
+while (editorKey.consumeClick()) {
+if (client.gui.screen() == null) {
+client.gui.setScreen(new EditorScreen(null));
+}
+}
+while (hideInMenusKey.consumeClick()) {
+hideInMenus = !hideInMenus;
+if (client.player != null) {
+client.gui.hud.setOverlayMessage(
+Component.literal("PojavHUD Hide in Menus: " + (hideInMenus ? "ON" : "OFF")),
+false
+);
+}
+}
+});
+​HudElementRegistry.addLast(Identifier.fromNamespaceAndPath(MOD_ID, "overlay"), (graphics, deltaTracker) -> {
+if (hudVisible && !editorOpen) {
+HudRenderer.render(graphics);
+}
+});
+​LOGGER.info("PojavHUD 1.2.0 (MC 26.3) initialized!");
+}
+}
+EOF
+​cat << 'EOF' > src/main/java/com/pojavhud/HudConfig.java
+package com.pojavhud;
+​import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import net.fabricmc.loader.api.FabricLoader;
+​import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+​public class HudConfig {
+private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+private static final Path CONFIG_PATH = FabricLoader.getInstance().getConfigDir().resolve("pojavhud.json");
+​public IconConfig[] icons = new IconConfig[9];
+public String delayMode = "HIGH";
+public float customDelay = 0.5f;
+public boolean showItemDecorations = true;
+​public HudConfig() {
+float startX = 0.35f;
+float spacing = 0.04f;
+for (int i = 0; i < 9; i++) {
+icons[i] = new IconConfig();
+icons[i].x = startX + i * spacing;
+icons[i].y = 0.5f;
+icons[i].scale = 1.0f;
+icons[i].opacity = 1.0f;
+}
+}
+​public static class IconConfig {
+public float x = 0.5f;
+public float y = 0.5f;
+public float scale = 1.0f;
+public float opacity = 1.0f;
+}
+​public long getDelayMs() {
+if (delayMode == null) return 300L;
+return switch (delayMode) {
+case "OFF" -> 0L;
+case "HIGH" -> 300L;
+case "MEDIUM" -> 900L;
+case "LOW" -> 1200L;
+case "CUSTOM" -> (long) (Math.max(0.0f, customDelay) * 1000.0f);
+default -> 300L;
+};
+}
+​public void cycleDelayMode() {
+if (delayMode == null) delayMode = "HIGH";
+delayMode = switch (delayMode) {
+case "OFF" -> "HIGH";
+case "HIGH" -> "MEDIUM";
+case "MEDIUM" -> "LOW";
+case "LOW" -> "CUSTOM";
+default -> "OFF";
+};
+save();
+}
+​public String getDelayButtonText() {
+if (delayMode == null) delayMode = "HIGH";
+return switch (delayMode) {
+case "OFF" -> "Opt: Off (0s)";
+case "HIGH" -> "Opt: High (0.3s)";
+case "MEDIUM" -> "Opt: Med (0.9s)";
+case "LOW" -> "Opt: Low (1.2s)";
+case "CUSTOM" -> "Opt: Custom";
+default -> "Opt: High (0.3s)";
+};
+}
+​public static HudConfig load() {
+if (Files.exists(CONFIG_PATH)) {
+try {
+String json = Files.readString(CONFIG_PATH);
+HudConfig config = GSON.fromJson(json, HudConfig.class);
+if (config != null && config.icons != null && config.icons.length == 9) {
+if (config.delayMode == null) config.delayMode = "HIGH";
+if (config.customDelay < 0.0f) config.customDelay = 0.5f;
+for (int i = 0; i < 9; i++) {
+if (config.icons[i] == null) {
+config.icons[i] = new IconConfig();
+}
+}
+return config;
+}
+} catch (Exception e) {
+PojavHudClient.LOGGER.error("Failed to load config", e);
+}
+}
+HudConfig config = new HudConfig();
+config.save();
+return config;
+}
+​public void save() {
+try {
+if (CONFIG_PATH.getParent() != null) {
+Files.createDirectories(CONFIG_PATH.getParent());
+}
+Files.writeString(CONFIG_PATH, GSON.toJson(this));
+} catch (IOException e) {
+PojavHudClient.LOGGER.error("Failed to save config", e);
+}
+}
+​public void reset() {
+HudConfig defaults = new HudConfig();
+this.icons = defaults.icons;
+this.delayMode = defaults.delayMode;
+this.customDelay = defaults.customDelay;
+this.showItemDecorations = defaults.showItemDecorations;
+HudRenderer.markLayoutDirty();
+save();
+}
+}
+EOF
+​cat << 'EOF' > src/main/java/com/pojavhud/HudRenderer.java
+package com.pojavhud;
+​import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
+​public class HudRenderer {
+private static final int BASE_SIZE = 16;
+​private static final ItemStack[] displayedStacks = new ItemStack[9];
+private static final Item[] pendingItems = new Item[9];
+private static final long[] changeTimestamps = new long[9];
+​private static final int[] cachedX = new int[9];
+private static final int[] cachedY = new int[9];
+private static final int[] cachedSize = new int[9];
+private static int lastScreenWidth = -1;
+private static int lastScreenHeight = -1;
+private static boolean layoutDirty = true;
+​static {
+for (int i = 0; i < 9; i++) {
+displayedStacks[i] = ItemStack.EMPTY;
+pendingItems[i] = Items.AIR;
+}
+}
+​public static void markLayoutDirty() {
+layoutDirty = true;
+}
+​private static void updateLayoutCache(int screenWidth, int screenHeight, HudConfig.IconConfig[] icons) {
+for (int i = 0; i < 9; i++) {
+HudConfig.IconConfig icon = icons[i];
+if (icon == null) continue;
+int size = (int) (BASE_SIZE * icon.scale);
+cachedSize[i] = size;
+cachedX[i] = (int) (icon.x * screenWidth) - size / 2;
+cachedY[i] = (int) (icon.y * screenHeight) - size / 2;
+}
+lastScreenWidth = screenWidth;
+lastScreenHeight = screenHeight;
+layoutDirty = false;
+}
+​public static void render(GuiGraphicsExtractor graphics) {
+Minecraft client = Minecraft.getInstance();
+if (client == null || client.player == null || client.options.hideGui) {
+return;
+}
+if (PojavHudClient.hideInMenus && client.gui.screen() != null) {
+return;
+}
+​Inventory inv = client.player.getInventory();
+int screenWidth = client.getWindow().getGuiScaledWidth();
+int screenHeight = client.getWindow().getGuiScaledHeight();
+HudConfig.IconConfig[] icons = PojavHudClient.config.icons;
+​if (layoutDirty || screenWidth != lastScreenWidth || screenHeight != lastScreenHeight) {
+updateLayoutCache(screenWidth, screenHeight, icons);
+}
+​long now = System.currentTimeMillis();
+long delayMs = PojavHudClient.config.getDelayMs();
+boolean showDecorations = PojavHudClient.config.showItemDecorations;
+Font font = client.font;
+​for (int i = 0; i < 9; i++) {
+HudConfig.IconConfig icon = icons[i];
+if (icon == null || icon.opacity <= 0.01f) continue;
+​ItemStack currentStack = inv.getItem(i);
+​if (currentStack == null || currentStack.isEmpty()) {
+displayedStacks[i] = ItemStack.EMPTY;
+pendingItems[i] = Items.AIR;
+continue;
+}
+​Item currentItem = currentStack.getItem();
+​if (delayMs <= 0L) {
+displayedStacks[i] = currentStack;
+pendingItems[i] = currentItem;
+} else {
+if (currentItem != pendingItems[i]) {
+pendingItems[i] = currentItem;
+changeTimestamps[i] = now;
+}
+if (now - changeTimestamps[i] >= delayMs || displayedStacks[i].is(currentItem)) {
+displayedStacks[i] = currentStack;
+}
+}
+​ItemStack toRender = displayedStacks[i];
+if (toRender == null || toRender.isEmpty()) continue;
+​int size = cachedSize[i];
+int x = cachedX[i];
+int y = cachedY[i];
+​var pose = graphics.pose();
+pose.pushMatrix();
+pose.translate(x + size / 2.0f, y + size / 2.0f);
+pose.scale(icon.scale, icon.scale);
+pose.translate(-8.0f, -8.0f);
+graphics.item(toRender, 0, 0);
+if (showDecorations && font != null) {
+graphics.itemDecorations(font, toRender, 0, 0);
+}
+pose.popMatrix();
+}
+}
+}
+EOF
+​cat << 'EOF' > src/main/java/com/pojavhud/EditorScreen.java
+package com.pojavhud;
+​import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.ItemStack;
+​public class EditorScreen extends Screen {
+private final Screen parent;
+private int selectedIcon = 0;
+private boolean dragging = false;
+private double dragOffsetX, dragOffsetY;
+private boolean resizing = false;
+​private Button optButton;
+private Button countButton;
+private EditBox customDelayField;
+​private static final int BASE_SIZE = 16;
+private static final int HANDLE_SIZE = 8;
+​public EditorScreen() {
+this(null);
+}
+​public EditorScreen(Screen parent) {
+super(Component.literal("PojavHUD Editor"));
+this.parent = parent;
+PojavHudClient.editorOpen = true;
+}
+​@Override
+protected void init() {
+int btnY = this.height - 30;
+​this.addRenderableWidget(Button.builder(Component.literal("Reset"), b -> {
+PojavHudClient.config.reset();
+if (optButton != null) {
+optButton.setMessage(Component.literal(PojavHudClient.config.getDelayButtonText()));
+}
+if (countButton != null) {
+countButton.setMessage(Component.literal("Count: " + (PojavHudClient.config.showItemDecorations ? "ON" : "OFF")));
+}
+if (customDelayField != null) {
+customDelayField.setValue(String.valueOf(PojavHudClient.config.customDelay));
+customDelayField.setVisible("CUSTOM".equals(PojavHudClient.config.delayMode));
+}
+}).bounds(10, btnY, 45, 20).build());
+​this.addRenderableWidget(Button.builder(Component.literal("Save"), b -> {
+PojavHudClient.config.save();
+this.onClose();
+}).bounds(60, btnY, 45, 20).build());
+​optButton = Button.builder(Component.literal(PojavHudClient.config.getDelayButtonText()), b -> {
+PojavHudClient.config.cycleDelayMode();
+b.setMessage(Component.literal(PojavHudClient.config.getDelayButtonText()));
+if (customDelayField != null) {
+customDelayField.setVisible("CUSTOM".equals(PojavHudClient.config.delayMode));
+}
+}).bounds(110, btnY, 90, 20).build();
+this.addRenderableWidget(optButton);
+​customDelayField = new EditBox(this.font, 205, btnY, 40, 20, Component.literal("Delay"));
+customDelayField.setMaxLength(6);
+customDelayField.setValue(String.valueOf(PojavHudClient.config.customDelay));
+customDelayField.setVisible("CUSTOM".equals(PojavHudClient.config.delayMode));
+customDelayField.setResponder(text -> {
+try {
+float val = Float.parseFloat(text.trim());
+if (val >= 0.0f && val <= 60.0f) {
+PojavHudClient.config.customDelay = val;
+}
+} catch (NumberFormatException ignored) {
+}
+});
+this.addRenderableWidget(customDelayField);
+​countButton = Button.builder(Component.literal("Count: " + (PojavHudClient.config.showItemDecorations ? "ON" : "OFF")), b -> {
+PojavHudClient.config.showItemDecorations = !PojavHudClient.config.showItemDecorations;
+b.setMessage(Component.literal("Count: " + (PojavHudClient.config.showItemDecorations ? "ON" : "OFF")));
+PojavHudClient.config.save();
+}).bounds(250, btnY, 75, 20).build();
+this.addRenderableWidget(countButton);
+​this.addRenderableWidget(Button.builder(Component.literal("Size+"), b -> {
+for (var icon : PojavHudClient.config.icons) {
+if (icon != null) icon.scale = Math.min(4.0f, icon.scale + 0.1f);
+}
+HudRenderer.markLayoutDirty();
+PojavHudClient.config.save();
+}).bounds(330, btnY, 35, 20).build());
+​this.addRenderableWidget(Button.builder(Component.literal("Size-"), b -> {
+for (var icon : PojavHudClient.config.icons) {
+if (icon != null) icon.scale = Math.max(0.5f, icon.scale - 0.1f);
+}
+HudRenderer.markLayoutDirty();
+PojavHudClient.config.save();
+}).bounds(370, btnY, 35, 20).build());
+​this.addRenderableWidget(Button.builder(Component.literal("Op+"), b -> {
+for (var icon : PojavHudClient.config.icons) {
+if (icon != null) icon.opacity = Math.min(1.0f, icon.opacity + 0.1f);
+}
+PojavHudClient.config.save();
+}).bounds(410, btnY, 30, 20).build());
+​this.addRenderableWidget(Button.builder(Component.literal("Op-"), b -> {
+for (var icon : PojavHudClient.config.icons) {
+if (icon != null) icon.opacity = Math.max(0.1f, icon.opacity - 0.1f);
+}
+PojavHudClient.config.save();
+}).bounds(445, btnY, 30, 20).build());
+​this.addRenderableWidget(Button.builder(Component.literal("Prev"), b -> selectedIcon = (selectedIcon + 8) % 9)
+.bounds(this.width - 110, btnY, 45, 20).build());
+this.addRenderableWidget(Button.builder(Component.literal("Next"), b -> selectedIcon = (selectedIcon + 1) % 9)
+.bounds(this.width - 60, btnY, 45, 20).build());
+}
+​@Override
+public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+graphics.fill(0, 0, this.width, this.height, 0x80000000);
+super.extractRenderState(graphics, mouseX, mouseY, delta);
+​Minecraft client = Minecraft.getInstance();
+Inventory inv = (client != null && client.player != null) ? client.player.getInventory() : null;
+HudConfig.IconConfig[] icons = PojavHudClient.config.icons;
+​graphics.text(this.font, "Selected: Icon " + (selectedIcon + 1) + " (Hotbar Slot " + (selectedIcon + 1) + ")", 10, 10, 0xFFFFFFFF, false);
+graphics.text(this.font, "Drag icon to move (grid snaps) | Corner to resize | Bottom buttons apply globally", 10, 22, 0xFFAAAAAA, false);
+graphics.text(this.font, String.format("Pos: (%.3f, %.3f)  Scale: %.2f  Opacity: %.2f  Delay: %.2fs",
+icons[selectedIcon].x, icons[selectedIcon].y, icons[selectedIcon].scale, icons[selectedIcon].opacity,
+PojavHudClient.config.getDelayMs() / 1000.0f), 10, 34, 0xFFFFFFFF, false);
+​for (int i = 0; i < 9; i++) {
+HudConfig.IconConfig icon = icons[i];
+if (icon == null) continue;
+int size = Math.max(8, (int) (BASE_SIZE * icon.scale));
+int x = (int) (icon.x * this.width) - size / 2;
+int y = (int) (icon.y * this.height) - size / 2;
+graphics.fill(x - 2, y - 2, x + size + 2, y + size + 2, i == selectedIcon ? 0x80FFFF00 : 0x40000000);
+​ItemStack stack = (inv != null) ? inv.getItem(i) : ItemStack.EMPTY;
+if (stack != null && !stack.isEmpty()) {
+var pose = graphics.pose();
+pose.pushMatrix();
+pose.translate(x + size / 2.0f, y + size / 2.0f);
+pose.scale(icon.scale, icon.scale);
+pose.translate(-8.0f, -8.0f);
+graphics.item(stack, 0, 0);
+if (PojavHudClient.config.showItemDecorations && client.font != null) {
+graphics.itemDecorations(client.font, stack, 0, 0);
+}
+pose.popMatrix();
+} else {
+graphics.centeredText(this.font, Component.literal(String.valueOf(i + 1)), x + size / 2, y + size / 2 - 4, 0xFF888888);
+}
+if (i == selectedIcon) {
+graphics.fill(x + size - HANDLE_SIZE, y + size - HANDLE_SIZE, x + size, y + size, 0xFFFFFFFF);
+}
+}
+}
+​private static boolean isLeftClick(int button) {
+return button == 0 || button == InputConstants.MOUSE_BUTTON_LEFT;
+}
+​@Override
+public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+if (super.mouseClicked(event, doubleClick)) {
+return true;
+}
+double mouseX = event.x();
+double mouseY = event.y();
+​if (isLeftClick(event.button())) {
+HudConfig.IconConfig icon = PojavHudClient.config.icons[selectedIcon];
+if (icon == null) return false;
+int size = Math.max(8, (int) (BASE_SIZE * icon.scale));
+int x = (int) (icon.x * this.width) - size / 2;
+int y = (int) (icon.y * this.height) - size / 2;
+​if (mouseX >= x + size - HANDLE_SIZE && mouseX <= x + size && mouseY >= y + size - HANDLE_SIZE && mouseY <= y + size) {
+resizing = true;
+return true;
+}
+if (mouseX >= x && mouseX <= x + size && mouseY >= y && mouseY <= y + size) {
+dragging = true;
+dragOffsetX = mouseX - (icon.x * this.width);
+dragOffsetY = mouseY - (icon.y * this.height);
+return true;
+}
+for (int i = 0; i < 9; i++) {
+HudConfig.IconConfig ic = PojavHudClient.config.icons[i];
+if (ic == null) continue;
+int s = Math.max(8, (int) (BASE_SIZE * ic.scale));
+int ix = (int) (ic.x * this.width) - s / 2;
+int iy = (int) (ic.y * this.height) - s / 2;
+if (mouseX >= ix && mouseX <= ix + s && mouseY >= iy && mouseY <= iy + s) {
+selectedIcon = i;
+dragging = true;
+dragOffsetX = mouseX - (ic.x * this.width);
+dragOffsetY = mouseY - (ic.y * this.height);
+return true;
+}
+}
+}
+return false;
+}
+​@Override
+public boolean mouseReleased(MouseButtonEvent event) {
+if (isLeftClick(event.button())) {
+dragging = false;
+resizing = false;
+HudRenderer.markLayoutDirty();
+PojavHudClient.config.save();
+}
+return super.mouseReleased(event);
+}
+​@Override
+public boolean mouseDragged(MouseButtonEvent event, double deltaX, double deltaY) {
+double mouseX = event.x();
+double mouseY = event.y();
+​if (isLeftClick(event.button())) {
+HudConfig.IconConfig icon = PojavHudClient.config.icons[selectedIcon];
+if (icon == null) return false;
+if (dragging) {
+float newX = Math.max(0.0f, Math.min(1.0f, (float) ((mouseX - dragOffsetX) / this.width)));
+float newY = Math.max(0.0f, Math.min(1.0f, (float) ((mouseY - dragOffsetY) / this.height)));
+for (int i = 0; i < 9; i++) {
+if (i == selectedIcon) continue;
+HudConfig.IconConfig other = PojavHudClient.config.icons[i];
+if (other == null) continue;
+if (Math.abs(other.y - newY) < 0.015f) newY = other.y;
+if (Math.abs(other.x - newX) < 0.015f) newX = other.x;
+}
+icon.x = newX;
+icon.y = newY;
+HudRenderer.markLayoutDirty();
+return true;
+}
+if (resizing) {
+int centerX = (int) (icon.x * this.width);
+int centerY = (int) (icon.y * this.height);
+double dist = Math.max(Math.abs(mouseX - centerX), Math.abs(mouseY - centerY));
+icon.scale = (float) Math.max(0.5, Math.min(4.0, dist / 8.0));
+HudRenderer.markLayoutDirty();
+return true;
+}
+}
+return super.mouseDragged(event, deltaX, deltaY);
+}
+​@Override
+public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+HudConfig.IconConfig icon = PojavHudClient.config.icons[selectedIcon];
+if (icon != null) {
+icon.opacity = (float) Math.max(0.1, Math.min(1.0, icon.opacity + verticalAmount * 0.05));
+}
+return true;
+}
+​@Override
+public void onClose() {
+PojavHudClient.editorOpen = false;
+HudRenderer.markLayoutDirty();
+PojavHudClient.config.save();
+if (this.minecraft != null) {
+this.minecraft.gui.setScreen(this.parent);
+}
+}
+​@Override
+public boolean isPauseScreen() {
+return false;
+}
+}
+EOF
+​echo "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" | base64 -d > src/main/resources/assets/pojavhud/icon.png
+​- name: Set up JDK 25
+uses: actions/setup-java@v4
+with:
+java-version: '25'
+distribution: 'temurin'
+​- name: Setup Gradle
+uses: gradle/actions/setup-gradle@v4
+with:
+gradle-version: '9.8.1'
+​- name: Build with Gradle
+run: gradle build --no-daemon --stacktrace
+​- name: Upload Build Artifact (.jar)
+uses: actions/upload-artifact@v4
+with:
+name: pojavhud-26.3-1.2.0-jar
+path: |
+build/libs/.jar
+!build/libs/-sources.jar
